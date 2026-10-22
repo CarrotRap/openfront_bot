@@ -34,37 +34,25 @@ openfront_bot/
 
 ## Installation
 
-Le projet suppose que ce dépôt (`rl/`) et [OpenFrontIO](https://github.com/openfrontio/OpenFrontIO)
-sont **côte à côte** sous un même dossier parent :
+[OpenFrontIO](https://github.com/openfrontio/OpenFrontIO) est épinglé en
+submodule sur la commit `af68a46de`. OpenFrontIO évolue vite et son
+`src/core/` a été restructuré après cette commit (split en packages
+engine/engine-api/shared), ce qui casse les imports du bridge TypeScript.
 
-```
-openfront_bot/
-├── OpenFrontIO/   ← git clone https://github.com/openfrontio/OpenFrontIO
-└── rl/            ← ce dépôt
-```
-
-OpenFrontIO évolue vite et son `src/core/` a été restructuré après la commit
-`af68a46de` (split en packages engine/engine-api/shared), ce qui casse les
-imports du bridge TypeScript. **Épingle la bonne commit** avant de lancer :
+Install complet depuis zéro :
 
 ```bash
-# Dossier parent
-mkdir -p openfront_bot && cd openfront_bot
-
-# Jeu, pinné sur la commit compatible
-git clone https://github.com/openfrontio/OpenFrontIO.git
-cd OpenFrontIO && git checkout af68a46de && npm install && cd ..
-
-# Ce dépôt
-git clone https://github.com/<ton-user>/openfront-rl.git rl
-cd rl
+git clone --recursive https://github.com/CarrotRap/openfront_bot.git
+cd openfront_bot/OpenFrontIO && npm install && cd ../rl
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 ./.venv/bin/jupyter notebook notebooks/quickstart.ipynb
 ```
 
-Si tu as déjà les deux dépôts localement, saute le `git clone` et fais juste
-le `npm install` dans `OpenFrontIO/` (après `git checkout af68a46de`) et le
-`pip install -r requirements.txt` dans `rl/`.
+Si tu as cloné sans `--recursive`, rattrape le submodule avant le reste :
+
+```bash
+git submodule update --init
+```
 
 Vérification rapide :
 
