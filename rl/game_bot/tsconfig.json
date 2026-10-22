@@ -1,0 +1,38 @@
+{
+  // Mirrors rl/bridge/tsconfig.json. Pulls OpenFrontIO's own sources in via
+  // path aliases so we can `import` zbin, schemas, GameRunner directly.
+  // Run from OpenFrontIO:
+  //   ./node_modules/.bin/tsc --noEmit -p ../rl/game_bot/tsconfig.json
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "resources/*": ["../../OpenFrontIO/resources/*"],
+      "src/*": ["../../OpenFrontIO/src/*"]
+    },
+    "sourceMap": false,
+    "noEmit": true,
+    "allowUnusedLabels": false,
+    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "strictNullChecks": true,
+    "useDefineForClassFields": false,
+    "strictPropertyInitialization": false,
+    "skipLibCheck": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "typeRoots": ["../../OpenFrontIO/node_modules/@types"]
+  },
+  // tsx applies this tsconfig to any file that matches `include`. We need
+  // it to apply to OpenFrontIO sources too so useDefineForClassFields:false
+  // is honored for them (OpenFront uses parameter properties + field
+  // initializers heavily, e.g. NationNukeBehavior.ts:44 reads this.game in
+  // a field initializer — only correct when `define` semantics is OFF).
+  "include": [
+    "src/**/*.ts",
+    "../bridge/src/**/*.ts",
+    "../../OpenFrontIO/src/**/*.ts",
+    "../../OpenFrontIO/tests/perf/fullgame/**/*.ts"
+  ]
+}

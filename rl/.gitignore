@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+
+# Training artifacts (checkpoints are big and reproducible)
+runs/
+*.zip
+logs/
+tensorboard/
+wandb/
+
+# LaTeX intermediates (keep the .tex + .pdf)
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~

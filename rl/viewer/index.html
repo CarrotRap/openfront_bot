@@ -1,0 +1,627 @@
+<!-- Live viewer UI. Served by viewer/server.py; no build step, no CDN. -->
+<title>OpenFront — bot live</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --line: #2b3340;
+    --ink: #e6edf3;
+    --dim: #8b949e;
+    --accent: #4ade80;
+    --warn: #f0b429;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 10;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  .tag {
+    font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim);
+  }
+  .spacer { flex: 1; }
+  button {
+    font: inherit; color: var(--ink); background: #21262d; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 7px; padding: 5px 12px;
+  }
+  button:hover { background: #2d333b; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  input[type="range"] { width: 130px; vertical-align: middle; }
+
+  main {
+    display: grid; gap: 16px; padding: 16px 20px 40px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (max-width: 940px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; min-width: 0;
+  }
+  section > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--dim); margin: 0 0 10px; font-weight: 600;
+  }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
+  .stack { display: grid; gap: 16px; align-content: start; min-width: 0; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+  .stat { background: #0d1117; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font: 15px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .stat span { color: var(--dim); font-size: 11px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; color: var(--dim); font-size: 11px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--dim); font-weight: 500; padding: 3px 6px; font-size: 11px; }
+  td { padding: 3px 6px; border-top: 1px solid var(--line); }
+  td.num { text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  tr.self td { color: var(--accent); }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+
+  .chans { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 8px; }
+  .chan { text-align: center; }
+  .chan canvas { border: 1px solid var(--line); }
+  .chan span { display: block; font-size: 9.5px; color: var(--dim); margin-top: 3px; line-height: 1.25; }
+
+  .action {
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0d1117; border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 11px; overflow-x: auto; white-space: nowrap;
+  }
+  .note { color: var(--dim); font-size: 11.5px; margin-top: 8px; }
+  .bad { color: #f85149; }
+  .good { color: var(--accent); }
+
+  /* Per-slot opponent cards. */
+  .slot {
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    background: #0d1117;
+  }
+  .slot.empty { opacity: 0.35; }
+  .slot header {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 0; border: none; background: none; position: static;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-bottom: 6px;
+  }
+  .slot header .idx { color: var(--warn); font-weight: 650; }
+  .slot header .flags { color: var(--dim); font-size: 11px; margin-left: auto; }
+  .slot .feats {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 2px 10px; font-size: 11px;
+  }
+  .slot .feat { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .slot .feat label {
+    color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px; min-width: 110px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .slot .feat .bar {
+    flex: 1; height: 6px; background: #1a1f28; border-radius: 2px;
+    overflow: hidden; position: relative;
+  }
+  .slot .feat .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--accent); border-radius: 2px;
+  }
+  .slot .feat.hot .fill { background: #f85149; }
+  .slot .feat .val {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px; color: var(--ink); min-width: 30px; text-align: right;
+  }
+</style>
+
+<header>
+  <h1>OpenFront — le bot en direct</h1>
+  <span class="tag" id="policy">…</span>
+  <span class="tag" id="status">connexion…</span>
+  <div class="spacer"></div>
+  <button id="playPause" aria-pressed="false">Pause</button>
+  <button id="reset">Nouvelle partie</button>
+  <label style="color: var(--dim)">
+    vitesse <input type="range" id="speed" min="0" max="60" value="24" />
+  </label>
+</header>
+
+<main>
+  <section>
+    <h2>Carte — le cadre jaune est la fenêtre observée par le bot</h2>
+    <canvas id="map" width="1024" height="1024"></canvas>
+    <div class="legend">
+      <span><i style="background:#4ade80"></i>agent</span>
+      <span><i style="background:#38bdf8"></i>allié</span>
+      <span><i style="background:#484e3e"></i>terrain neutre</span>
+      <span><i style="background:#112240"></i>océan</span>
+      <span><i style="background:#f0b429"></i>fenêtre d'observation + grille d'action</span>
+      <span><i style="background:#ffffff"></i>case ciblée par l'action</span>
+      <span id="zoomTag" style="margin-left:auto;font-family:ui-monospace,Menlo,monospace"></span>
+    </div>
+    <p class="note" id="windowNote"></p>
+  </section>
+
+  <div class="stack">
+    <section>
+      <h2>Action en cours</h2>
+      <div class="action" id="actionLabel">—</div>
+      <div class="stats" style="margin-top: 10px">
+        <div class="stat"><b id="sReward">—</b><span>récompense</span></div>
+        <div class="stat"><b id="sStep">—</b><span>pas / épisode</span></div>
+        <div class="stat"><b id="sTiles">—</b><span>territoire</span></div>
+        <div class="stat"><b id="sTroops">—</b><span>troupes</span></div>
+        <div class="stat"><b id="sGold">—</b><span>or</span></div>
+        <div class="stat"><b id="sAlive">—</b><span>joueurs en vie</span></div>
+      </div>
+      <p class="note" id="maskNote"></p>
+    </section>
+
+    <section>
+      <h2>Ce que voit le bot — vue composite (fenêtre ego-centrée)</h2>
+      <canvas id="ego" width="512" height="512"></canvas>
+      <p class="note">
+        Reconstruit à partir des canaux d'observation eux-mêmes : les
+        structures (économiques / militaires / anti-air) sont mélangées
+        en blanc (à soi) ou noir (ennemi), les warships ont leur propre
+        teinte, les flèches d'attaque colorent la frontière.
+      </p>
+    </section>
+
+    <section>
+      <h2>Mini-map globale — vue basse-résolution de toute la carte</h2>
+      <canvas id="minimap" width="384" height="384"></canvas>
+      <p class="note">
+        Branche séparée du réseau : la fenêtre ego-centrée ignore ce qui se
+        passe hors zoom, cette mini-map voit tout. 32×32 cases, 5 canaux
+        (<code id="minimapChans">…</code>).
+      </p>
+    </section>
+
+    <section>
+      <h2>Canaux d'observation (fenêtre ego)</h2>
+      <div class="chans" id="chans"></div>
+    </section>
+
+    <section>
+      <h2>Joueurs</h2>
+      <table>
+        <thead>
+          <tr><th>joueur</th><th style="text-align:right">tuiles</th><th style="text-align:right">troupes</th><th style="text-align:right">slot</th></tr>
+        </thead>
+        <tbody id="players"></tbody>
+      </table>
+      <p class="note">
+        « slot » = l'index de la tête <code>target_slot</code> qui désigne ce joueur
+        (vide s'il n'occupe aucun des K slots visibles).
+      </p>
+    </section>
+
+    <section>
+      <h2>Détails par slot d'adversaire — ce que le bot voit de chacun</h2>
+      <div id="slots" style="display:grid;gap:8px;"></div>
+      <p class="note">
+        Un bloc par slot <code>target_slot</code>. Les barres sont les features
+        normalisées [0, 1] du vecteur <code>players[slot]</code>. Un slot vide
+        (flag <code>valid=0</code>) est grisé.
+      </p>
+    </section>
+  </div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const mapCanvas = $("map");
+  const mapCtx = mapCanvas.getContext("2d");
+  const egoCanvas = $("ego");
+  const egoCtx = egoCanvas.getContext("2d");
+  const miniCanvas = $("minimap");
+  const miniCtx = miniCanvas.getContext("2d");
+
+  // Action-type indices mirror ACTION_TYPES in bridge/src/spec.ts.
+  const A_BOAT = 2, A_BUILD = 3;
+
+  let chanCanvases = null;
+  let pending = null, drawing = false;
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  // ---------------------------------------------------------------- map
+
+  function drawMap(frame, img) {
+    const scale = Math.max(1, Math.floor(1024 / Math.max(frame.mapW, frame.mapH)));
+    const w = frame.mapW * scale, h = frame.mapH * scale;
+    mapCanvas.width = w;
+    mapCanvas.height = h;
+    mapCtx.imageSmoothingEnabled = false;
+    mapCtx.clearRect(0, 0, w, h);
+    mapCtx.drawImage(img, 0, 0, w, h);
+
+    for (const s of frame.structures) {
+      mapCtx.fillStyle = s.self ? "#ffffff" : "rgba(0,0,0,0.65)";
+      mapCtx.fillRect(s.x * scale - 1, s.y * scale - 1, Math.max(2, scale), Math.max(2, scale));
+    }
+
+    const win = frame.window;
+    const wx = win.x * scale, wy = win.y * scale;
+    const ww = win.w * scale, wh = win.h * scale;
+
+    // Grid of the positional action head, inside the observed window.
+    mapCtx.strokeStyle = "rgba(240,180,41,0.16)";
+    mapCtx.lineWidth = 1;
+    mapCtx.beginPath();
+    for (let i = 1; i < win.grid; i++) {
+      const t = i / win.grid;
+      mapCtx.moveTo(wx + ww * t, wy); mapCtx.lineTo(wx + ww * t, wy + wh);
+      mapCtx.moveTo(wx, wy + wh * t); mapCtx.lineTo(wx + ww, wy + wh * t);
+    }
+    mapCtx.stroke();
+
+    // The cell the current action points at (build site / landing site).
+    const a = frame.action;
+    if (a && (a[0] === A_BUILD || a[0] === A_BOAT)) {
+      const gx = a[4] % win.grid, gy = Math.floor(a[4] / win.grid);
+      const cw = ww / win.grid, ch = wh / win.grid;
+      mapCtx.fillStyle = "rgba(255,255,255,0.32)";
+      mapCtx.fillRect(wx + gx * cw, wy + gy * ch, cw, ch);
+      mapCtx.strokeStyle = "#ffffff";
+      mapCtx.lineWidth = 2;
+      mapCtx.strokeRect(wx + gx * cw, wy + gy * ch, cw, ch);
+    }
+
+    mapCtx.strokeStyle = "#f0b429";
+    mapCtx.lineWidth = 2.5;
+    mapCtx.strokeRect(wx, wy, ww, wh);
+    $("zoomTag").textContent = `zoom ${win.zoomLevel + 1}/${win.zoomLevels} · ${win.tiles} tuiles`;
+
+    const full = Math.round(win.w) >= frame.mapW && Math.round(win.h) >= frame.mapH;
+    $("windowNote").textContent =
+      `Fenêtre : ${win.tiles}×${win.tiles} tuiles → ${win.grid}×${win.grid} cases ` +
+      `(1 case = ${win.cellTiles} tuile${win.cellTiles > 1 ? "s" : ""}) · ` +
+      `zoom ${win.zoomLevel + 1}/${win.zoomLevels}` +
+      (full
+        ? " — dézoomée jusqu'à la carte entière."
+        : " — elle se dézoome quand le territoire du bot grandit.");
+  }
+
+  // ------------------------------------------------------- bot's own view
+
+  const CH_COLORS = {
+    ocean: [17, 34, 64],
+    owner_neutral_land: [72, 78, 62],
+    owner_enemy: [200, 70, 70],
+    owner_ally: [56, 189, 248],
+    owner_self: [74, 222, 128],
+  };
+
+  function drawEgo(frame) {
+    const [C, G] = frame.spatialShape;
+    const data = b64ToBytes(frame.spatial);
+    const idx = (c, y, x) => (c * G + y) * G + x;
+    const ch = (name) => frame.channels.indexOf(name);
+
+    const off = document.createElement("canvas");
+    off.width = G; off.height = G;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(G, G);
+
+    const order = ["ocean", "owner_neutral_land", "owner_enemy", "owner_ally", "owner_self"];
+    const iLand = ch("land"), iBorder = ch("self_border");
+    const iOff = ch("off_map"), iBoat = ch("boat_target");
+    // Structures are now split by role (econ / mil / antiair) + warships move
+    // dynamically, so the "a tile has one of my structures" test is an OR.
+    const selfStructChs = [
+      "econ_self", "mil_self", "antiair_self", "warship_self",
+    ].map(ch).filter((i) => i >= 0);
+    const enemyStructChs = [
+      "econ_enemy", "mil_enemy", "antiair_enemy", "warship_enemy",
+    ].map(ch).filter((i) => i >= 0);
+    const iTrade = ch("trade_route");
+    const iAttackIn = ch("attack_in_intensity");
+    const iAttackOut = ch("attack_out_intensity");
+
+    const anyOn = (list, y, x) => {
+      for (const c of list) if (data[idx(c, y, x)] > 127) return true;
+      return false;
+    };
+
+    for (let y = 0; y < G; y++) {
+      for (let x = 0; x < G; x++) {
+        // Water that is not open ocean (lakes, coastal strips) sets neither
+        // the land nor the ocean channel, so water is the base, not black.
+        let rgb = [26, 44, 72];
+        if (data[idx(iOff, y, x)] > 127) rgb = [0, 0, 0];
+        else {
+          if (data[idx(iLand, y, x)] > 127) rgb = [52, 56, 45];
+          for (const name of order) {
+            const c = ch(name);
+            if (c >= 0 && data[idx(c, y, x)] > 127) rgb = CH_COLORS[name];
+          }
+          if (iBoat >= 0 && data[idx(iBoat, y, x)] > 127)
+            rgb = mix(rgb, [255, 190, 90], 0.35);
+          if (iBorder >= 0 && data[idx(iBorder, y, x)] > 127)
+            rgb = mix(rgb, [255, 255, 255], 0.45);
+          // Structures: blend rather than overwrite so the owner colour still
+          // reads underneath once the window is dezoomed and cells cover many
+          // tiles each.
+          if (anyOn(enemyStructChs, y, x)) rgb = mix(rgb, [20, 20, 20], 0.6);
+          if (anyOn(selfStructChs, y, x)) rgb = mix(rgb, [255, 255, 255], 0.55);
+          if (iTrade >= 0 && data[idx(iTrade, y, x)] > 127)
+            rgb = mix(rgb, [240, 180, 41], 0.5);
+          // Attack flow: incoming paints red, outgoing paints green, scaled
+          // by the channel's intensity so weak attacks only tint faintly.
+          if (iAttackIn >= 0) {
+            const v = data[idx(iAttackIn, y, x)] / 255;
+            if (v > 0.05) rgb = mix(rgb, [248, 81, 73], Math.min(0.7, v));
+          }
+          if (iAttackOut >= 0) {
+            const v = data[idx(iAttackOut, y, x)] / 255;
+            if (v > 0.05) rgb = mix(rgb, [74, 222, 128], Math.min(0.6, v));
+          }
+        }
+        const o = (y * G + x) * 4;
+        img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
+        img.data[o + 3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+
+    const scale = Math.max(1, Math.floor(512 / G));
+    egoCanvas.width = G * scale; egoCanvas.height = G * scale;
+    egoCtx.imageSmoothingEnabled = false;
+    egoCtx.drawImage(off, 0, 0, G * scale, G * scale);
+
+    const a = frame.action;
+    if (a && (a[0] === A_BUILD || a[0] === A_BOAT)) {
+      const gx = a[4] % G, gy = Math.floor(a[4] / G);
+      egoCtx.strokeStyle = "#ffffff"; egoCtx.lineWidth = 2;
+      egoCtx.strokeRect(gx * scale, gy * scale, scale, scale);
+    }
+    drawChannels(frame, data, C, G);
+  }
+
+  function drawMinimap(frame) {
+    if (!frame.minimap || !frame.minimapShape) return;
+    const [MC, M] = frame.minimapShape;
+    const data = b64ToBytes(frame.minimap);
+    const idx = (c, y, x) => (c * M + y) * M + x;
+    const names = frame.minimapChannels;
+    const ch = (name) => names.indexOf(name);
+    const iLand = ch("land");
+    const iSelf = ch("owner_self");
+    const iAlly = ch("owner_ally");
+    const iEnemy = ch("owner_enemy");
+    const iStr = ch("strength");
+
+    const off = document.createElement("canvas");
+    off.width = M; off.height = M;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(M, M);
+
+    for (let y = 0; y < M; y++) {
+      for (let x = 0; x < M; x++) {
+        let rgb = [26, 44, 72];
+        if (iLand >= 0 && data[idx(iLand, y, x)] > 127) rgb = [52, 56, 45];
+        if (iEnemy >= 0 && data[idx(iEnemy, y, x)] > 127) rgb = CH_COLORS.owner_enemy;
+        if (iAlly >= 0 && data[idx(iAlly, y, x)] > 127) rgb = CH_COLORS.owner_ally;
+        if (iSelf >= 0 && data[idx(iSelf, y, x)] > 127) rgb = CH_COLORS.owner_self;
+        if (iStr >= 0) {
+          const v = data[idx(iStr, y, x)] / 255;
+          if (v > 0.05) rgb = mix(rgb, [255, 255, 255], v * 0.35);
+        }
+        const o = (y * M + x) * 4;
+        img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
+        img.data[o + 3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    const scale = Math.max(1, Math.floor(384 / M));
+    miniCanvas.width = M * scale; miniCanvas.height = M * scale;
+    miniCtx.imageSmoothingEnabled = false;
+    miniCtx.drawImage(off, 0, 0, M * scale, M * scale);
+    $("minimapChans").textContent = names.join(", ");
+  }
+
+  // Features whose high values mean "this opponent is dangerous for me".
+  // They render in red rather than green so the hot adversary pops out.
+  const HOT_FEATS = new Set([
+    "attack_in_strength_log",
+    "attacking_self",
+    "they_target_self",
+    "border_threat_log",
+    "troops_log",
+    "troops_share_vs_self",
+  ]);
+  // Features worth surfacing as "flags" in the slot header (one-line summary).
+  const FLAG_FEATS = [
+    "is_allied", "is_same_team", "is_traitor", "is_disconnected",
+    "is_immune", "in_doomsday", "is_decaying", "is_nation",
+    "attacking_self", "self_attacking_them",
+  ];
+
+  function drawSlots(frame) {
+    const host = $("slots");
+    const names = frame.playerFeatures || [];
+    const rows = frame.playersObs || [];
+    if (!rows.length || !names.length) { host.innerHTML = ""; return; }
+    const parts = rows.map((row, slot) => {
+      const valid = row[0] >= 0.5;
+      // Match slot to player by index (slot i in players table = slot_i).
+      const player = (frame.players || []).find((p) => p.slot === slot);
+      const flags = FLAG_FEATS
+        .filter((f) => {
+          const j = names.indexOf(f);
+          return j >= 0 && row[j] >= 0.5;
+        })
+        .map((f) => f.replace(/_/g, " "));
+      const feats = names.map((n, j) => {
+        if (n === "valid") return "";
+        const v = Math.max(0, Math.min(1, row[j]));
+        const pct = (v * 100).toFixed(0);
+        const hot = HOT_FEATS.has(n) && v > 0.1;
+        return `
+          <div class="feat${hot ? " hot" : ""}">
+            <label title="${n}">${n}</label>
+            <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+            <span class="val">${v.toFixed(2)}</span>
+          </div>`;
+      }).join("");
+      const name = player
+        ? `<span class="swatch" style="background:${player.color}"></span>${escapeHtml(player.name)}`
+        : "<span style='color:var(--dim)'>vide</span>";
+      return `
+        <div class="slot${valid ? "" : " empty"}">
+          <header>
+            <span class="idx">slot ${slot}</span>
+            <span>${name}</span>
+            <span class="flags">${flags.join(" · ")}</span>
+          </header>
+          <div class="feats">${feats}</div>
+        </div>`;
+    });
+    host.innerHTML = parts.join("");
+  }
+
+  function mix(a, b, t) {
+    return [0, 1, 2].map((i) => Math.round(a[i] * (1 - t) + b[i] * t));
+  }
+
+  function drawChannels(frame, data, C, G) {
+    if (chanCanvases === null) {
+      const host = $("chans");
+      host.innerHTML = "";
+      chanCanvases = frame.channels.map((name) => {
+        const wrap = document.createElement("div");
+        wrap.className = "chan";
+        const cv = document.createElement("canvas");
+        cv.width = G; cv.height = G;
+        const label = document.createElement("span");
+        label.textContent = name;
+        wrap.append(cv, label);
+        host.append(wrap);
+        return cv;
+      });
+    }
+    for (let c = 0; c < C && c < chanCanvases.length; c++) {
+      const cv = chanCanvases[c];
+      if (cv.width !== G) { cv.width = G; cv.height = G; }
+      const ctx = cv.getContext("2d");
+      const img = ctx.createImageData(G, G);
+      for (let i = 0; i < G * G; i++) {
+        const v = data[c * G * G + i];
+        const o = i * 4;
+        img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v; img.data[o + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+  }
+
+  // --------------------------------------------------------------- panels
+
+  const fmt = (n) => (n === undefined || n === null ? "—" : Number(n).toLocaleString("fr-FR"));
+
+  function drawPanels(frame) {
+    $("policy").textContent = "politique : " + frame.policy;
+    const st = { running: "en cours", reset: "nouvelle partie", won: "VICTOIRE",
+                 dead: "éliminé", truncated: "temps écoulé" }[frame.status] || frame.status;
+    $("status").textContent = `épisode ${frame.episode} — ${st}`;
+    $("status").className = "tag " + (frame.status === "won" ? "good" : frame.status === "dead" ? "bad" : "");
+
+    $("actionLabel").textContent =
+      (frame.action_label || "—") +
+      (frame.info.invalid ? "   ⟵ rejetée par le moteur" : "");
+    $("sReward").textContent = frame.reward >= 0 ? "+" + frame.reward : frame.reward;
+    $("sStep").textContent = frame.step;
+    $("sTiles").textContent = fmt(frame.info.tiles);
+    $("sTroops").textContent = fmt(frame.info.troops);
+    $("sGold").textContent = fmt(frame.info.gold);
+    $("sAlive").textContent = fmt(frame.info.players_alive);
+
+    const m = frame.maskCounts;
+    $("maskNote").textContent = Object.keys(m).length
+      ? "actions légales : " + Object.entries(m)
+          .map(([k, v]) => `${k.replace("mask_", "")}=${v}`).join("  ·  ")
+      : "";
+
+    $("players").innerHTML = frame.players.slice(0, 14).map((p) => `
+      <tr class="${p.isSelf ? "self" : ""}">
+        <td><span class="swatch" style="background:${p.color}"></span>${escapeHtml(p.name)}</td>
+        <td class="num">${fmt(p.tiles)}</td>
+        <td class="num">${fmt(p.troops)}</td>
+        <td class="num">${p.slot === null ? "" : p.slot + 1}</td>
+      </tr>`).join("");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+
+  // ---------------------------------------------------------------- loop
+
+  function render(frame) {
+    const img = new Image();
+    img.onload = () => {
+      drawMap(frame, img);
+      drawEgo(frame);
+      drawMinimap(frame);
+      drawPanels(frame);
+      drawSlots(frame);
+      drawing = false;
+      if (pending) { const next = pending; pending = null; drawing = true; render(next); }
+    };
+    img.src = frame.map;
+  }
+
+  const source = new EventSource("/events");
+  source.onmessage = (e) => {
+    const frame = JSON.parse(e.data);
+    if (drawing) { pending = frame; return; }   // never queue up behind the sim
+    drawing = true;
+    render(frame);
+  };
+  source.onerror = () => { $("status").textContent = "déconnecté"; };
+
+  // -------------------------------------------------------------- controls
+
+  async function control(action, value) {
+    const res = await fetch("/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, value }),
+    });
+    return res.json();
+  }
+
+  let paused = false;
+  $("playPause").onclick = async () => {
+    paused = !paused;
+    await control(paused ? "pause" : "play");
+    $("playPause").textContent = paused ? "Reprendre" : "Pause";
+    $("playPause").setAttribute("aria-pressed", String(paused));
+  };
+  $("reset").onclick = () => {
+    paused = false;
+    $("playPause").textContent = "Pause";
+    $("playPause").setAttribute("aria-pressed", "false");
+    control("reset");
+  };
+  $("speed").oninput = (e) => {
+    // Slider right = faster: 60 -> no delay, 0 -> 0.6 s between decisions.
+    control("speed", (60 - Number(e.target.value)) / 100);
+  };
+</script>

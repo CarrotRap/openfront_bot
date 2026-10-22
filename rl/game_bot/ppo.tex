@@ -1,0 +1,339 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[margin=2cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{titlesec}
+\tcbuselibrary{breakable,skins}
+
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+\titlespacing*{\section}{0pt}{10pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+\titleformat{\section}{\normalfont\bfseries\Large}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalfont\bfseries\large}{\thesubsection}{0.5em}{}
+
+\newtheoremstyle{clean}{6pt}{6pt}{\itshape}{}{\bfseries}{.}{.5em}{}
+\theoremstyle{clean}
+\newtheorem*{defn}{Définition}
+\newtheorem*{thm}{Théorème}
+\newtheorem*{prop}{Proposition}
+\newtheorem*{intu}{Intuition}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\piT}{\pi_{\theta}}
+\newcommand{\piOld}{\pi_{\theta_{\text{old}}}}
+
+\newtcolorbox{keybox}[1][]{
+  colback=blue!5, colframe=blue!40!black, boxrule=0.4pt, arc=1.5pt,
+  left=6pt, right=6pt, top=4pt, bottom=4pt, #1
+}
+\newtcolorbox{intubox}[1][]{
+  colback=yellow!8, colframe=orange!60!black, boxrule=0.3pt, arc=1.5pt,
+  left=6pt, right=6pt, top=4pt, bottom=4pt, #1
+}
+
+\begin{document}
+\begin{center}\textbf{\LARGE PPO, expliqué pour de vrai}\\[2pt]
+\small Du MDP à l'algorithme complet, avec les intuitions qui manquent dans les papiers\end{center}
+
+\section{De quoi on parle, en une image}
+
+On a un \textbf{agent} (notre réseau de neurones) qui prend des décisions dans un \textbf{environnement} (le jeu OpenFront). À chaque instant $t$ :
+\begin{enumerate}[nosep,leftmargin=1.5em]
+\item L'environnement donne à l'agent un \textbf{état} $s_t$ (ce qu'il voit : carte, troupes, or\dots).
+\item L'agent choisit une \textbf{action} $a_t$ (attaquer, construire, débarquer\dots).
+\item L'environnement renvoie une \textbf{récompense} $r_t\in\R$ (positif si c'est bien, négatif si c'est mal) et un nouvel état $s_{t+1}$.
+\end{enumerate}
+L'agent veut \textbf{maximiser la somme des récompenses} sur toute la partie. Pour ça, il doit apprendre une \emph{politique} --- une règle qui dit « dans l'état $s$, prends l'action $a$ avec probabilité tant ». PPO est juste \emph{une façon spécifique} d'apprendre cette politique à partir d'expérience.
+
+\textbf{Ce qui rend ça dur} : on n'a \emph{pas} un prof qui dit « la bonne action en $s_t$ était $a_t^\star$ ». On a juste la récompense, qui arrive parfois longtemps après la décision qui l'a provoquée --- construire une Factory maintenant rapporte dans 100 pas. C'est le problème du \emph{crédit différé}.
+
+\section{Les objets de base : MDP, politique, retour}
+
+\subsection{Le MDP}
+
+\begin{defn}[Markov Decision Process]
+Un MDP est un tuple $(\mathcal{S}, \mathcal{A}, P, r, \gamma, \rho_0)$ où :
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item $\mathcal{S}$ : espace des états possibles (pour nous : toutes les configs du jeu),
+\item $\mathcal{A}$ : espace des actions,
+\item $P(s'\mid s,a)$ : \emph{dynamique} --- la probabilité d'arriver en $s'$ après avoir fait $a$ en $s$,
+\item $r(s,a)\in\R$ : récompense immédiate,
+\item $\gamma\in[0,1)$ : facteur d'actualisation (voir ci-dessous),
+\item $\rho_0$ : loi des états initiaux.
+\end{itemize}
+L'adjectif \emph{Markov} signifie que $P$ ne dépend que de $(s,a)$, pas de l'historique : tout ce qu'il faut savoir du passé est contenu dans $s_t$.
+\end{defn}
+
+\subsection{La politique}
+
+\begin{defn}[Politique]
+Une politique $\piT(a\mid s)$ est une distribution de probabilité sur $\mathcal{A}$ pour chaque état $s$. Elle est \emph{paramétrée} par $\theta\in\R^d$ : concrètement, $\theta$ ce sont tous les poids du réseau de neurones. Changer $\theta$ = changer le comportement de l'agent.
+\end{defn}
+
+\textbf{Pourquoi une politique stochastique} (et pas une fonction déterministe $s\mapsto a$) ? Trois raisons :
+\begin{enumerate}[nosep,leftmargin=1.5em]
+\item \textbf{Exploration} : si la politique était déterministe, elle ne découvrirait jamais une meilleure action.
+\item \textbf{Gradient bien défini} : on va vouloir dériver, et la probabilité est différentiable, l'$\arg\max$ non.
+\item \textbf{Robustesse aux adversaires} : dans un jeu, être prédictible est une faiblesse.
+\end{enumerate}
+
+\subsection{Le retour}
+
+\begin{defn}[Retour actualisé]
+À partir du pas $t$, le retour est
+\[
+G_t \coloneqq r_t + \gamma r_{t+1} + \gamma^2 r_{t+2} + \dots = \sum_{k=0}^{\infty} \gamma^k\, r_{t+k}.
+\]
+\end{defn}
+
+\begin{intu}
+Le facteur $\gamma$ (typiquement $0{,}99$) dit « une récompense dans $k$ pas vaut $\gamma^k$ fois une récompense maintenant ». Avec $\gamma=0{,}99$, une récompense dans 100 pas vaut $0{,}99^{100}\approx 0{,}37$ fois une récompense immédiate. Deux rôles :
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item \textbf{Mathématique} : garantit que la somme converge même pour un horizon infini.
+\item \textbf{Comportemental} : encourage à récompenser \emph{tôt}. Sans $\gamma$, l'agent serait indifférent entre gagner maintenant ou dans mille ans.
+\end{itemize}
+\end{intu}
+
+\subsection{L'objectif à maximiser}
+
+Le but de PPO (et de tout le RL) est de trouver $\theta$ qui maximise le retour \emph{espéré} à partir d'un état initial :
+\[
+J(\theta) \coloneqq \E_{\tau \sim \piT}\!\left[\, \sum_{t\geq 0} \gamma^t r_t \,\right],
+\]
+où $\tau=(s_0,a_0,r_0,s_1,\dots)$ est une \textbf{trajectoire} tirée en roulant la politique dans l'environnement. L'espérance est sur deux sources d'aléa : (i) le choix d'actions par la politique, (ii) la dynamique $P$ de l'environnement.
+
+\section{Les fonctions de valeur}
+
+Pour raisonner, on a besoin de savoir « combien vaut cet état ? » et « combien vaut cette action dans cet état ? ».
+
+\begin{defn}[Fonctions de valeur]
+Pour une politique $\piT$ fixée :
+\begin{align*}
+V^{\piT}(s) &\coloneqq \E_{\piT}\!\big[G_t \mid s_t = s\big] & &\text{(valeur de l'état $s$)},\\
+Q^{\piT}(s,a) &\coloneqq \E_{\piT}\!\big[G_t \mid s_t = s,\, a_t = a\big] & &\text{(valeur d'avoir fait $a$ en $s$)}.
+\end{align*}
+L'\textbf{avantage} compare les deux :
+\[
+A^{\piT}(s,a) \coloneqq Q^{\piT}(s,a) - V^{\piT}(s).
+\]
+\end{defn}
+
+\begin{intu}
+$V^{\piT}(s)$ répond à « si je joue avec ma politique à partir d'ici, qu'est-ce que je gagne en moyenne ? ». $Q^{\piT}(s,a)$ répond à « si je prends l'action $a$ maintenant, puis je joue avec ma politique, qu'est-ce que je gagne ? ». L'avantage est la \emph{différence} : $A>0$ veut dire « cette action est meilleure que la moyenne de ce que je fais habituellement en $s$ », $A<0$ dit « cette action est pire que la moyenne ».
+
+Pourquoi l'avantage plutôt que $Q$ brut ? Parce que la \emph{magnitude} de $Q$ dépend de la position dans la partie (en fin de partie, tous les $Q$ sont grands, tout est bon), alors que $A$ reste autour de zéro : c'est un signal \textbf{calibré par la situation}.
+\end{intu}
+
+\textbf{Dans notre code} : le réseau sort une fonction de valeur $V_\phi(s)$ qui approxime $V^{\piT}$. On n'apprend pas $Q$ directement.
+
+\section{Comment on fait monter $J(\theta)$ ? Le gradient de politique}
+
+On veut faire $\theta \leftarrow \theta + \alpha \nabla_\theta J(\theta)$. Mais $J$ est une espérance sur des trajectoires qui dépendent de $\theta$ --- comment on dérive ça ?
+
+\begin{thm}[Théorème du gradient de politique, Sutton 1999]
+\[
+\nabla_\theta J(\theta) \;=\; \E_{s \sim d^{\piT},\, a \sim \piT(\cdot|s)}\!\big[\, \nabla_\theta \log \piT(a \mid s) \cdot Q^{\piT}(s,a) \,\big].
+\]
+\end{thm}
+
+\textbf{L'idée de la preuve} (en 3 lignes) : écrire $J = \E_\tau[R(\tau)]$ puis sortir le gradient de l'espérance en utilisant le \emph{log-trick}
+$\nabla_\theta p_\theta(\tau) = p_\theta(\tau)\, \nabla_\theta \log p_\theta(\tau)$.
+Puisque $p_\theta(\tau)=\rho_0(s_0)\prod_t \piT(a_t|s_t) P(s_{t+1}|s_t,a_t)$, et que la dynamique $P$ ne dépend pas de $\theta$, seules les $\log\piT(a_t|s_t)$ survivent dans le gradient.
+
+\begin{intu}
+Le gradient dit : \textbf{si une action a eu un $Q$ élevé, augmente sa log-probabilité ; si elle a eu un $Q$ faible, diminue-la.} C'est tout. On monte la probabilité de ce qui a marché, on descend celle de ce qui n'a pas marché. Le $\log$ vient du changement de variable, mais pratiquement c'est un softmax avec cross-entropy pondérée par $Q$.
+\end{intu}
+
+\subsection{Réduire la variance : la baseline}
+
+L'estimateur du théorème est non biaisé, mais sa \emph{variance} est énorme (le $Q$ peut valoir n'importe quoi en magnitude). Astuce standard : soustraire une \textbf{baseline} $b(s)$ qui ne dépend pas de $a$. L'espérance ne change pas :
+\[
+\E_{a\sim\piT}\!\big[\nabla \log\piT(a|s)\, b(s)\big] = b(s) \nabla \underbrace{\sum_a \piT(a|s)}_{=1} = 0.
+\]
+Le meilleur choix est $b(s) = V^{\piT}(s)$. Alors $Q^{\piT}(s,a) - V^{\piT}(s) = A^{\piT}(s,a)$ et
+\[
+\boxed{\;\nabla_\theta J(\theta) \;=\; \E\!\big[\, \nabla_\theta \log \piT(a \mid s) \cdot A^{\piT}(s,a) \,\big].\;}
+\]
+C'est la forme utilisée en pratique par tous les actor-critic.
+
+\section{Estimer l'avantage : GAE}
+
+En pratique on ne connaît pas $A^{\piT}$, on a juste des trajectoires. Comment estimer $\hat A_t$ ? Deux extrêmes :
+
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item \textbf{Monte-Carlo} : $\hat A_t = G_t - V_\phi(s_t)$. Non biaisé mais variance énorme (dépend de \emph{toute} la fin d'épisode).
+\item \textbf{TD(0)} : $\hat A_t = \delta_t \coloneqq r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)$. Faible variance (1 pas) mais biaisé (dépend de $V_\phi$ qui est inexact).
+\end{itemize}
+
+\begin{defn}[Generalized Advantage Estimation, Schulman 2016]
+\[
+\hat A_t^{\mathrm{GAE}(\gamma,\lambda)} \;\coloneqq\; \sum_{l=0}^{\infty} (\gamma\lambda)^{l}\, \delta_{t+l}
+\;=\; \delta_t + \gamma\lambda\, \hat A_{t+1}^{\mathrm{GAE}}.
+\]
+\end{defn}
+
+\begin{prop}
+$\lambda=0 \Rightarrow \hat A_t = \delta_t$ (TD, biais max). $\lambda=1 \Rightarrow \hat A_t = G_t - V_\phi(s_t)$ (Monte-Carlo, variance max). Un $\lambda\in[0{,}9;\,0{,}98]$ trouve un bon compromis.
+\end{prop}
+
+En pratique, on calcule les $\hat A_t$ \textbf{en remontant la trajectoire} (dernier pas d'abord), ce qui donne une récurrence en $O(T)$. Le \emph{retour cible} pour entraîner le critique est $\hat R_t = \hat A_t + V_\phi(s_t)$.
+
+Enfin, on \textbf{normalise} les avantages par mini-batch : $\hat A_t \leftarrow (\hat A_t - \mu)/(\sigma + 10^{-8})$. Ça empêche les tailles de gradient d'exploser si une récompense anormale apparaît.
+
+\section{Le vrai problème : on ne peut faire qu'un seul pas de gradient}
+
+Le gradient de la section précédente est un \emph{gradient $\pi_\theta$-sur-$\pi_\theta$} : il faut que l'espérance soit prise sous la politique \emph{courante}. Si on fait un pas de gradient, $\theta$ change, et les trajectoires qu'on avait collectées sont obsolètes --- elles ont été générées par l'ancienne politique.
+
+Collecter une nouvelle trajectoire à chaque pas de gradient est \textbf{catastrophiquement lent}. On aimerait réutiliser le même batch pour plusieurs pas de SGD. Problème : comment corriger le fait que les données viennent de $\piOld$ et pas de $\piT$ ?
+
+\subsection{Échantillonnage préférentiel}
+
+\begin{prop}[Importance sampling]
+Pour toute fonction $f$,
+\[
+\E_{a\sim\piT}[f(a)] \;=\; \E_{a\sim\piOld}\!\left[\frac{\piT(a)}{\piOld(a)}\, f(a)\right].
+\]
+\end{prop}
+
+On définit le \textbf{ratio de vraisemblance}
+\[
+r_t(\theta) \coloneqq \frac{\piT(a_t \mid s_t)}{\piOld(a_t \mid s_t)}.
+\]
+Noter : à l'instant de la collecte, $\theta = \theta_{\text{old}}$, donc $r_t = 1$. Au fur et à mesure qu'on fait des pas de gradient, $r_t$ s'éloigne de 1.
+
+L'objectif de substitution (ou \emph{surrogate}) utilisé par TRPO et PPO est alors :
+\[
+L^{\mathrm{IS}}(\theta) \;=\; \E_t\!\big[\, r_t(\theta)\, \hat A_t \,\big].
+\]
+C'est un objectif qu'on peut dériver en $\theta$ sans avoir à collecter de nouvelles données, tant que $\piT$ reste proche de $\piOld$.
+
+\subsection{Pourquoi « proche » ?}
+
+\begin{thm}[Borne de Kakade--Langford, 2002]
+Il existe $C>0$ tel que
+\[
+J(\piT) \;\geq\; L^{\mathrm{IS}}(\theta) \;-\; C \cdot \max_s D_{\mathrm{KL}}\!\big(\piOld(\cdot|s) \,\|\, \piT(\cdot|s)\big).
+\]
+\end{thm}
+
+\begin{intu}
+Si on améliore $L^{\mathrm{IS}}$ \emph{tout en restant proche de $\piOld$} (petit KL), on améliore aussi le vrai $J$. Si on s'éloigne trop, l'inégalité devient inutile : $L^{\mathrm{IS}}$ peut monter alors que $J$ s'écroule.
+
+Autrement dit : l'IS corrige exactement l'écart si on reste local ; au-delà, le ratio $r_t$ devient énorme ou minuscule, les gradients explosent, l'optimisation diverge.
+\end{intu}
+
+\textbf{Deux stratégies :}
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item \textbf{TRPO} (2015) : impose la contrainte $\E[D_{\mathrm{KL}}] \leq \delta$ \emph{dur}, à chaque étape, et résout un problème d'optimisation quadratique. Coûteux et compliqué.
+\item \textbf{PPO} (2017) : approxime cette contrainte par un \textbf{clip} dans la fonction de perte. C'est tout.
+\end{itemize}
+
+\section{Le c\oe{}ur de PPO : l'objectif clippé}
+
+\begin{keybox}
+\[
+L^{\mathrm{CLIP}}(\theta) \;=\; \E_t\!\Big[\, \min\!\big(\, r_t(\theta)\, \hat A_t,\;\; \mathrm{clip}(r_t(\theta),\, 1-\epsilon,\, 1+\epsilon)\, \hat A_t \,\big) \,\Big].
+\]
+avec typiquement $\epsilon = 0{,}2$.
+\end{keybox}
+
+C'est l'équation la plus importante du papier. Déchiffrons-la cas par cas.
+
+\subsection{Lecture géométrique}
+
+Pour un $t$ donné, considérons $L_t = \min(r_t \hat A_t, \mathrm{clip}(r_t, 1-\epsilon, 1+\epsilon)\, \hat A_t)$ comme fonction de $r_t$ (donc de $\theta$).
+
+\textbf{Cas 1 : $\hat A_t > 0$} (l'action était meilleure que la moyenne).
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item Pour $r_t \in [1-\epsilon, 1+\epsilon]$ : $L_t = r_t \hat A_t$. Augmenter $r_t$ augmente la perte. On \emph{pousse} la politique à augmenter la probabilité de cette action.
+\item Pour $r_t > 1+\epsilon$ : $L_t = (1+\epsilon)\hat A_t$ constant. \textbf{Plus de gradient}. On arrête de pousser.
+\item Pour $r_t < 1-\epsilon$ : $L_t = r_t \hat A_t$ (le $\min$ prend la version non-clippée, qui est plus petite). On \emph{pousse} fort pour remonter.
+\end{itemize}
+\textbf{Résultat : on autorise à augmenter la probabilité, mais pas au-delà d'un facteur $1+\epsilon$ par rapport à $\piOld$.}
+
+\textbf{Cas 2 : $\hat A_t < 0$} (l'action était mauvaise).
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item Pour $r_t \in [1-\epsilon, 1+\epsilon]$ : $L_t = r_t \hat A_t$. Diminuer $r_t$ augmente la perte. On \emph{pousse} à réduire cette action.
+\item Pour $r_t < 1-\epsilon$ : $L_t = (1-\epsilon)\hat A_t$ constant. \textbf{Plus de gradient}. On arrête.
+\item Pour $r_t > 1+\epsilon$ : $L_t = r_t \hat A_t$ (le $\min$ prend la version non-clippée, plus petite car $\hat A<0$). On pousse fort à redescendre.
+\end{itemize}
+\textbf{Résultat : on autorise à diminuer la probabilité, mais pas au-delà d'un facteur $1-\epsilon$.}
+
+\begin{intu}
+Le $\min$ garantit qu'on prend toujours la \textbf{borne la plus pessimiste} de l'objectif : $L^{\mathrm{CLIP}} \leq L^{\mathrm{IS}}$. On optimise un \emph{minorant}, donc l'améliorer améliore nécessairement (approximativement) le vrai $J$ --- c'est cohérent avec Kakade--Langford. Et la coupure dure du gradient quand on sort du couloir $[1-\epsilon, 1+\epsilon]$ \emph{dans le sens où on pousserait trop} fait office de trust region.
+\end{intu}
+
+\section{La perte complète}
+
+Dans un actor-critic (notre cas), le réseau a deux têtes : la politique $\piT$ et le critique $V_\phi$. On minimise :
+\[
+L^{\mathrm{PPO}}(\theta,\phi) \;=\; -\E_t\!\Big[\, \underbrace{L^{\mathrm{CLIP}}_t(\theta)}_{\text{politique}} \;-\; c_1 \underbrace{(V_\phi(s_t) - \hat R_t)^2}_{\text{critique}} \;+\; c_2 \underbrace{\mathcal{H}[\piT(\cdot|s_t)]}_{\text{entropie}} \,\Big].
+\]
+Trois ingrédients :
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item \textbf{Politique} ($L^{\mathrm{CLIP}}$) : fait monter les log-probabilités des actions à avantage positif, descendre celles à avantage négatif, avec garde-fou.
+\item \textbf{Critique} (MSE) : apprend $V_\phi$ à prédire $\hat R_t = \hat A_t + V_\phi(s_t)_{\text{old}}$. Un meilleur critique = meilleurs avantages = meilleur gradient de politique.
+\item \textbf{Entropie} : prime à l'incertitude. Empêche la politique de devenir quasi-déterministe trop vite, maintient l'exploration. $c_2 \in [0;\, 0{,}01]$.
+\end{itemize}
+Les deux têtes partagent souvent les premières couches (le \emph{backbone}) --- c'est ce qu'on fait avec le `MultiBranchExtractor` : les 768 features sont partagées, puis deux MLP de taille 384 pour $\pi$ et $V$.
+
+\section{L'algorithme PPO, bout à bout}
+
+\begin{tcolorbox}[colback=gray!5, colframe=black!50, boxrule=0.4pt, arc=1.5pt, left=8pt, right=8pt]
+\textbf{Entrées} : réseau $\piT$ et critique $V_\phi$ (initialisés aléatoirement), $\epsilon=0{,}2$, $\gamma=0{,}99$, $\lambda=0{,}95$, $N$ pas par collecte, $K$ époques, mini-batch $M$.
+
+\medskip
+\textbf{Boucle principale, jusqu'à convergence :}
+\begin{enumerate}[leftmargin=1.5em, nosep]
+\item \textbf{Collecte.} Avec $\theta_{\text{old}} \leftarrow \theta$, rouler $\piOld$ dans l'environnement pendant $N$ pas, en parallèle sur $N_{\text{env}}$ workers. Stocker $(s_t, a_t, r_t, \log\piOld(a_t|s_t), V_\phi(s_t))$.
+\item \textbf{Avantage.} Calculer $\hat A_t^{\mathrm{GAE}}$ en remontant la trajectoire, puis $\hat R_t = \hat A_t + V_\phi(s_t)$.
+\item \textbf{Normaliser} les $\hat A_t$ par mini-batch (centre + variance).
+\item \textbf{Optimisation.} Pour $k = 1, \dots, K$ époques :\\
+Mélanger les $N$ transitions, découper en mini-batchs de taille $M$. Pour chaque mini-batch :
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item Calculer $r_t(\theta) = \exp\!\big(\log\piT(a_t|s_t) - \log\piOld(a_t|s_t)\big)$.
+\item Calculer $L^{\mathrm{CLIP}}$, perte critique MSE, bonus d'entropie.
+\item Une étape d'Adam sur $(\theta, \phi)$, avec clipping de la norme du gradient (typiquement $0{,}5$).
+\end{itemize}
+\end{enumerate}
+\end{tcolorbox}
+
+\textbf{Hyperparamètres canoniques} (Schulman 2017, SB3) :\\
+$\gamma=0{,}99$, $\lambda=0{,}95$, $\epsilon=0{,}2$, $K \in \{4, \dots, 10\}$, $c_1 = 0{,}5$, $c_2 \in [0;\, 0{,}01]$, lr Adam $= 3\cdot 10^{-4}$, grad-norm clip $= 0{,}5$.
+
+\section{Lien avec notre code}
+
+Le mapping, pour que ce soit concret :
+\begin{itemize}[nosep,leftmargin=1.2em]
+\item $\piT$ et $V_\phi$ : les deux têtes de `MaskablePPO` dans \texttt{train.py}. Backbone partagé = \texttt{MultiBranchExtractor} (CNN + MLP + pooling adversaires).
+\item \textbf{Masques d'action} : les logits des actions illégales sont mis à $-\infty$ avant le softmax ; le ratio $r_t$ reste bien défini, le gradient aussi. C'est tout l'apport de MaskablePPO par rapport à PPO vanille.
+\item \textbf{N\_env} : contrôlé par \texttt{--envs} ; chacun est un process Node séparé via le pont. L'astuce de \texttt{OpenFrontVecEnv} est d'envoyer les $N$ commandes d'abord puis de collecter les $N$ réponses --- les simulations se recouvrent.
+\item \textbf{Récompense} : définie dans \texttt{bridge/src/env.ts}, principalement la variation de territoire normalisée par la part équitable. Les termes télescopiques annulent l'effet des allers-retours.
+\item \textbf{Avantage} : SB3 calcule GAE automatiquement avec $\gamma = 0{,}99$ et $\lambda = 0{,}95$.
+\item \textbf{Clip} : $\epsilon = 0{,}2$ par défaut dans SB3. On ne le change jamais.
+\end{itemize}
+
+\section{Les intuitions à retenir}
+
+\begin{enumerate}[nosep,leftmargin=1.5em]
+\item \textbf{Le gradient de politique dit juste : « monte la proba de ce qui a marché »}, pondéré par la qualité relative (avantage) de l'action.
+\item \textbf{On a besoin d'une baseline} pour que le signal soit calibré. C'est le rôle de $V_\phi$.
+\item \textbf{On veut réutiliser un batch} pour plusieurs pas de gradient, donc on introduit un ratio d'importance $r_t(\theta)$. Mais ce ratio n'est valable que si la politique n'a pas trop bougé.
+\item \textbf{Le clip est juste une astuce} pour approximer la contrainte « la politique n'a pas trop bougé », sans avoir à calculer de divergence KL ni résoudre de problème quadratique.
+\item \textbf{GAE} est le compromis biais/variance pour estimer l'avantage à partir d'une trajectoire.
+\item \textbf{La perte totale} combine politique + valeur + entropie. Les trois sont indispensables : enlever l'entropie, la politique s'effondre vite sur une action unique ; enlever le critique, l'avantage est inchiffrable.
+\end{enumerate}
+
+\medskip\hrule\smallskip
+{\footnotesize \textit{Références} : Sutton \& Barto, \emph{Reinforcement Learning: An Introduction}, 2nd ed., 2018. Schulman et al., \emph{TRPO}, ICML 2015. Schulman et al., \emph{GAE}, ICLR 2016. Schulman et al., \emph{PPO}, arXiv:1707.06347, 2017. Kakade \& Langford, \emph{Approximately Optimal Approximate RL}, ICML 2002.}
+
+\end{document}

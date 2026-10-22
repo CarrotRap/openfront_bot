@@ -1,0 +1,9 @@
+{
+  "name": "openfront-game-bot",
+  "private": true,
+  "type": "module",
+  "description": "Node WebSocket client that plays OpenFront as a real player, driven by the trained RL model.",
+  "scripts": {
+    "typecheck": "cd ../../OpenFrontIO && ./node_modules/.bin/tsc --noEmit -p ../rl/game_bot/tsconfig.json"
+  }
+}

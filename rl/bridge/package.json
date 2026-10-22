@@ -1,0 +1,6 @@
+{
+  "name": "openfront-rl-bridge",
+  "private": true,
+  "type": "module",
+  "description": "Headless OpenFront simulation driver for the Python Gymnasium environment."
+}

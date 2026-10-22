@@ -1,0 +1,10 @@
+gymnasium>=0.29
+numpy>=1.24
+# Training + notebook (optional but used by notebooks/quickstart.ipynb)
+torch>=2.0
+stable-baselines3>=2.3
+sb3-contrib>=2.3
+matplotlib>=3.7
+tqdm
+rich  # progress_bar=True in SB3
+jupyter

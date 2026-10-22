@@ -1,0 +1,29 @@
+{
+  // Mirrors OpenFrontIO/tsconfig.json so the game's own sources typecheck the
+  // same way when they are pulled in transitively. Run it from OpenFrontIO:
+  //   ./node_modules/.bin/tsc --noEmit -p ../rl/bridge/tsconfig.json
+  // Errors under src/client/ are expected — that code depends on Vite globals
+  // the bridge never loads. Anything under ../rl/bridge/src/ is ours.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "resources/*": ["../../OpenFrontIO/resources/*"],
+      "src/*": ["../../OpenFrontIO/src/*"]
+    },
+    "sourceMap": false,
+    "noEmit": true,
+    "allowUnusedLabels": false,
+    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "strictNullChecks": true,
+    "useDefineForClassFields": false,
+    "strictPropertyInitialization": false,
+    "skipLibCheck": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "typeRoots": ["../../OpenFrontIO/node_modules/@types"]
+  },
+  "include": ["src/**/*.ts"]
+}
